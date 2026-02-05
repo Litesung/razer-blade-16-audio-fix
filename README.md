@@ -1,6 +1,6 @@
 # Razer Blade 16 Audio Fix
 
-Complete audio fix for Razer Blade 16 (2023/2024) on Linux. Fixes speakers, automatic headphone switching, and audio hissing.
+Complete audio fix for Razer Blade 16 (2023/2024) on Linux. Fixes speakers, automatic headphone switching, audio hissing, and game audio static.
 
 ## Problems Solved
 
@@ -10,6 +10,7 @@ Complete audio fix for Razer Blade 16 (2023/2024) on Linux. Fixes speakers, auto
 | No auto-switching | Plugging headphones doesn't switch audio | Virtual sink + switching daemon |
 | Audio hissing | Periodic hiss/crackle on 3.5mm output | Disable HDA power management |
 | Paused playback | Media pauses when switching devices | Seamless stream redirection |
+| Game audio static | Crackling/static in games at 44100Hz | Multi-rate PipeWire + high-quality resampling |
 
 ## Supported Hardware
 
@@ -48,7 +49,8 @@ sudo ./install.sh
 | Speaker fix script | `/usr/local/bin/razer-blade-speaker-fix.sh` | Initializes ALC298 codec |
 | Boot service | `/etc/systemd/system/razer-blade-speaker-fix.service` | Runs fix at boot |
 | Resume service | `/etc/systemd/system/razer-blade-speaker-fix-resume.service` | Runs fix after suspend |
-| Virtual sink | `~/.config/pipewire/pipewire.conf.d/` | PipeWire Main-Output sink |
+| Virtual sink | `~/.config/pipewire/pipewire.conf.d/10-virtual-output.conf` | PipeWire Main-Output sink |
+| Clock rate config | `~/.config/pipewire/pipewire.conf.d/10-clock-rate.conf` | 44100Hz/48000Hz support + resampling quality |
 | Audio daemon | `~/.local/bin/razer-blade-audio-daemon` | Auto-switches devices |
 | Daemon service | `~/.config/systemd/user/` | User service for daemon |
 | WirePlumber config | `~/.config/wireplumber/wireplumber.conf.d/` | Routing settings |

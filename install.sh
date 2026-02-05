@@ -13,6 +13,7 @@
 #   2. No automatic headphone/speaker switching when plugging 3.5mm
 #   3. Periodic hissing on 3.5mm headphone output
 #   4. Audio pausing when switching between devices
+#   5. Static/crackling in games outputting at 44100Hz (sample rate mismatch)
 #
 # Tested: Razer Blade 16 (RZ09-0510) with ALC298 codec
 # Requires: PipeWire, WirePlumber, alsa-tools (hda-verb)
@@ -2155,6 +2156,25 @@ VIRT
 }
 
 # ============================================================
+# PIPEWIRE CLOCK RATE (44100Hz + 48000Hz support)
+# ============================================================
+install_clock_rate() {
+    log_step "Configuring PipeWire clock rates..."
+    cat > "$REAL_HOME/.config/pipewire/pipewire.conf.d/10-clock-rate.conf" << 'CLOCK'
+context.properties = {
+    default.clock.rate = 48000
+    default.clock.allowed-rates = [ 44100 48000 ]
+}
+
+stream.properties = {
+    resample.quality = 10
+}
+CLOCK
+    chown "$REAL_USER:$REAL_USER" "$REAL_HOME/.config/pipewire/pipewire.conf.d/10-clock-rate.conf"
+    log_info "Clock rate config installed (44100Hz + 48000Hz, high-quality resampling)"
+}
+
+# ============================================================
 # WIREPLUMBER CONFIGS
 # ============================================================
 install_wireplumber() {
@@ -2334,6 +2354,7 @@ uninstall() {
     rm -f "$REAL_HOME/.config/systemd/user/razer-blade-audio-daemon.service"
     rm -f "$REAL_HOME/.local/bin/razer-blade-audio-daemon"
     rm -f "$REAL_HOME/.config/pipewire/pipewire.conf.d/10-virtual-output.conf"
+    rm -f "$REAL_HOME/.config/pipewire/pipewire.conf.d/10-clock-rate.conf"
     rm -f "$REAL_HOME/.config/wireplumber/wireplumber.conf.d/50-razer-audio.conf"
     rm -f /etc/udev/rules.d/99-razer-blade-audio.rules
     rm -f /etc/modprobe.d/razer-blade-audio.conf
@@ -2345,8 +2366,8 @@ uninstall() {
 
 case "${1:-install}" in
     --install|install) check_root; check_deps; check_hardware; create_dirs
-        install_speaker_fix; install_services; install_virtual_sink; install_wireplumber
-        install_daemon; install_hissing_fix; install_sudoers; enable_user_services
+        install_speaker_fix; install_services; install_virtual_sink; install_clock_rate
+        install_wireplumber; install_daemon; install_hissing_fix; install_sudoers; enable_user_services
         restart_audio; show_complete ;;
     --uninstall|uninstall) check_root; uninstall ;;
     --help|-h) echo "Usage: sudo $0 [--install|--uninstall|--help]" ;;
