@@ -1,0 +1,162 @@
+# Razer Blade 16 Audio Fix
+
+Complete audio fix for Razer Blade 16 (2023/2024) on Linux. Fixes speakers, automatic headphone switching, and audio hissing.
+
+## Problems Solved
+
+| Issue | Symptom | Fix |
+|-------|---------|-----|
+| Silent speakers | Internal speakers produce no sound | ALC298 codec initialization via hda-verb |
+| No auto-switching | Plugging headphones doesn't switch audio | Virtual sink + switching daemon |
+| Audio hissing | Periodic hiss/crackle on 3.5mm output | Disable HDA power management |
+| Paused playback | Media pauses when switching devices | Seamless stream redirection |
+
+## Supported Hardware
+
+- **Razer Blade 16 (2023)** - RZ09-0483
+- **Razer Blade 16 (2024)** - RZ09-0510
+
+Other Razer laptops with ALC298 codec may also work.
+
+## Requirements
+
+- Linux with PipeWire and WirePlumber
+- systemd
+- `alsa-tools` package (installed automatically)
+
+Tested on Arch Linux, should work on Fedora, Ubuntu 24.04+, and other modern distros.
+
+## Quick Install
+
+```bash
+# Download and run
+curl -fsSL https://raw.githubusercontent.com/litesung/razer-blade-16-audio-fix/main/install.sh | sudo bash
+```
+
+Or clone and run:
+
+```bash
+git clone https://github.com/litesung/razer-blade-16-audio-fix.git
+cd razer-blade-16-audio-fix
+sudo ./install.sh
+```
+
+## What Gets Installed
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Speaker fix script | `/usr/local/bin/razer-blade-speaker-fix.sh` | Initializes ALC298 codec |
+| Boot service | `/etc/systemd/system/razer-blade-speaker-fix.service` | Runs fix at boot |
+| Resume service | `/etc/systemd/system/razer-blade-speaker-fix-resume.service` | Runs fix after suspend |
+| Virtual sink | `~/.config/pipewire/pipewire.conf.d/` | PipeWire Main-Output sink |
+| Audio daemon | `~/.local/bin/razer-blade-audio-daemon` | Auto-switches devices |
+| Daemon service | `~/.config/systemd/user/` | User service for daemon |
+| WirePlumber config | `~/.config/wireplumber/wireplumber.conf.d/` | Routing settings |
+| Udev rules | `/etc/udev/rules.d/99-razer-blade-audio.rules` | Disable power management |
+| Modprobe config | `/etc/modprobe.d/razer-blade-audio.conf` | Disable power saving |
+| Sudoers rule | `/etc/sudoers.d/razer-blade-audio` | Allow daemon hda-verb access |
+
+## How It Works
+
+### Speaker Fix
+
+The ALC298 codec in Razer Blade 16 requires ~2000 register writes to initialize properly. The Linux driver doesn't do this automatically, so speakers are silent out of the box. This fix sends the necessary `hda-verb` commands at boot and after resume.
+
+### Automatic Switching
+
+```
+┌─────────────────────────────────────────────────┐
+│              Audio Architecture                  │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  Apps ──► Main-Output (virtual sink)            │
+│                │                                │
+│                ├──► Speakers (when unplugged)   │
+│                │                                │
+│                └──► Headphones (when plugged)   │
+│                                                 │
+│  Bluetooth ──► Direct connection (no virtual)   │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+The daemon polls the headphone jack state every second and automatically:
+- Switches to headphones when plugged in
+- Falls back to speakers (or Bluetooth) when unplugged
+- Uses "last connected wins" - plugging headphones while on BT switches to headphones
+
+## Verify Installation
+
+```bash
+# Check services
+systemctl status razer-blade-speaker-fix.service
+systemctl --user status razer-blade-audio-daemon
+
+# Check virtual sink
+pactl get-default-sink  # Should show "Main-Output"
+
+# Check speaker fix log
+cat /tmp/razer-blade-speaker-fix.log
+
+# Check daemon logs
+journalctl --user -u razer-blade-audio-daemon -f
+```
+
+## Uninstall
+
+```bash
+sudo ./install.sh --uninstall
+```
+
+Or if you used curl:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/litesung/razer-blade-16-audio-fix/main/install.sh | sudo bash -s -- --uninstall
+```
+
+## Troubleshooting
+
+### Speakers still silent
+
+```bash
+# Run fix manually
+sudo /usr/local/bin/razer-blade-speaker-fix.sh
+
+# Check log
+cat /tmp/razer-blade-speaker-fix.log
+```
+
+### Auto-switching not working
+
+```bash
+# Check daemon status
+systemctl --user status razer-blade-audio-daemon
+
+# Restart daemon
+systemctl --user restart razer-blade-audio-daemon
+
+# Check jack detection manually
+sudo hda-verb /dev/snd/hwC1D0 0x21 GET_PIN_SENSE 0
+# 0x80000000 = plugged, 0x0 = unplugged
+```
+
+### Wrong audio card number
+
+The script auto-detects the card number, but if you have multiple audio devices:
+
+```bash
+# List audio devices
+aplay -l
+
+# Check which card has ALC298
+cat /proc/asound/cards
+```
+
+## Credits
+
+- Speaker fix based on research from [Arch Linux Forums](https://bbs.archlinux.org/viewtopic.php?id=285121)
+- HDA verb sequences derived from Windows driver analysis
+
+## License
+
+MIT License - see [LICENSE](LICENSE)
