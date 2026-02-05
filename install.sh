@@ -2156,14 +2156,14 @@ VIRT
 }
 
 # ============================================================
-# PIPEWIRE CLOCK RATE (multi-rate support)
+# PIPEWIRE CLOCK RATE (44100Hz + 48000Hz support)
 # ============================================================
 install_clock_rate() {
     log_step "Configuring PipeWire clock rates..."
     cat > "$REAL_HOME/.config/pipewire/pipewire.conf.d/10-clock-rate.conf" << 'CLOCK'
 context.properties = {
     default.clock.rate = 48000
-    default.clock.allowed-rates = [ 44100 48000 96000 192000 ]
+    default.clock.allowed-rates = [ 44100 48000 ]
 }
 
 stream.properties = {
@@ -2171,7 +2171,7 @@ stream.properties = {
 }
 CLOCK
     chown "$REAL_USER:$REAL_USER" "$REAL_HOME/.config/pipewire/pipewire.conf.d/10-clock-rate.conf"
-    log_info "Clock rate config installed (44100/48000/96000/192000Hz, high-quality resampling)"
+    log_info "Clock rate config installed (44100Hz + 48000Hz, high-quality resampling)"
 }
 
 # ============================================================
