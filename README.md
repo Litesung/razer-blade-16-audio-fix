@@ -62,28 +62,140 @@ sudo ./install.sh
 
 The ALC298 codec in Razer Blade 16 requires ~2000 register writes to initialize properly. The Linux driver doesn't do this automatically, so speakers are silent out of the box. This fix sends the necessary `hda-verb` commands at boot and after resume.
 
-### Automatic Switching
+### Hybrid Audio Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│              Audio Architecture                  │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  Apps ──► Main-Output (virtual sink)            │
-│                │                                │
-│                ├──► Speakers (when unplugged)   │
-│                │                                │
-│                └──► Headphones (when plugged)   │
-│                                                 │
-│  Bluetooth ──► Direct connection (no virtual)   │
-│                                                 │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│              Hybrid Audio Architecture                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐            │
+│  │ Firefox │  │ Spotify │  │  Game   │  │  App N  │            │
+│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘            │
+│       │            │            │            │                  │
+│       └────────────┴─────┬──────┴────────────┘                  │
+│                          │                                      │
+│              ┌───────────┴───────────┐                          │
+│              │   Default Sink        │                          │
+│              │  (set by daemon)      │                          │
+│              └───────────┬───────────┘                          │
+│                          │                                      │
+│         ┌────────────────┴────────────────┐                     │
+│         │                                 │                     │
+│         ▼                                 ▼                     │
+│  ┌─────────────────────┐          ┌─────────────────┐           │
+│  │    Main-Output      │          │   Bluetooth     │           │
+│  │   (Virtual Sink)    │          │   (Direct)      │           │
+│  │                     │          │                 │           │
+│  │  For: Speakers &    │          │  Apps connect   │           │
+│  │       3.5mm Jack    │          │  directly to    │           │
+│  └──────────┬──────────┘          │  BT sink        │           │
+│             │                     └─────────────────┘           │
+│       pw-link                                                   │
+│             │                                                   │
+│      ┌──────┴──────┐                                            │
+│      ▼             ▼                                            │
+│  ┌────────┐  ┌──────────┐                                       │
+│  │Speaker │  │Headphones│  Hardware sinks at 100%               │
+│  │ (100%) │  │  (100%)  │  Volume controlled via Main-Output    │
+│  └────────┘  └──────────┘                                       │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-The daemon polls the headphone jack state every second and automatically:
-- Switches to headphones when plugged in
-- Falls back to speakers (or Bluetooth) when unplugged
-- Uses "last connected wins" - plugging headphones while on BT switches to headphones
+**Why hybrid?** Bluetooth works fine natively. The virtual sink solves the HDA profile switching problem for speakers/headphones only.
+
+### Seamless Device Switching
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Seamless Device Switching Flow                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  CASE 1: Speaker ↔ Headphones (via Virtual Sink)                │
+│  ───────────────────────────────────────────────                │
+│                                                                 │
+│  App ──► Main-Output ─────────────────────────► (continuous)    │
+│              │                                                  │
+│              │ pw-link (reconnects instantly)                   │
+│              ▼                                                  │
+│         ┌─────────┐        ┌─────────┐                          │
+│         │ Speaker │ ─────► │Headphone│                          │
+│         └─────────┘        └─────────┘                          │
+│              │                  │                               │
+│         [unlink]           [link]                               │
+│                                                                 │
+│  App never knows device changed - stream stays on Main-Output   │
+│                                                                 │
+│  ═══════════════════════════════════════════════════════════    │
+│                                                                 │
+│  CASE 2: Any ↔ Bluetooth (Direct Switch)                        │
+│  ───────────────────────────────────────                        │
+│                                                                 │
+│  App ──► Main-Output                App ──► Bluetooth           │
+│              │          pactl           │                       │
+│              │      move-sink-input     │                       │
+│              └──────────────────────────┘                       │
+│                                                                 │
+│  Daemon moves active streams seamlessly - no rebuffering        │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Auto-Switching Daemon
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              Daemon - "Last Connected Wins"                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│                    ┌────────────────┐                           │
+│                    │  Poll every 1s │ ◄─────────────────────┐   │
+│                    └───────┬────────┘                       │   │
+│                            │                                │   │
+│             ┌──────────────┴──────────────┐                 │   │
+│             ▼                             ▼                 │   │
+│  ┌────────────────────┐       ┌────────────────────┐        │   │
+│  │ hda-verb: check    │       │ pactl: check for   │        │   │
+│  │ jack pin state     │       │ bluez_output sink  │        │   │
+│  └──────────┬─────────┘       └──────────┬─────────┘        │   │
+│             │                            │                  │   │
+│      ┌──────┴──────┐              ┌──────┴──────┐           │   │
+│      │             │              │             │           │   │
+│   CHANGED      unchanged      CHANGED      unchanged        │   │
+│      │             │              │             │           │   │
+│      ▼             │              ▼             │           │   │
+│  ┌────────┐        │         ┌────────┐        │           │   │
+│  │ Switch │        │         │ Switch │        │           │   │
+│  └────┬───┘        │         └────┬───┘        │           │   │
+│       │            │              │            │            │   │
+│       └────────────┴──────────────┴────────────┘            │   │
+│                            │                                │   │
+│                            └────────────────────────────────┘   │
+│                                                                 │
+│  ═══════════════════════════════════════════════════════════    │
+│                                                                 │
+│  JACK PLUGGED IN:                                               │
+│    1. Set Main-Output as default                                │
+│    2. Move streams to Main-Output                               │
+│    3. Switch HDA profile to Headphones                          │
+│    4. pw-link Main-Output → Headphone sink                      │
+│    5. Set hardware volume to 100%                               │
+│                                                                 │
+│  JACK UNPLUGGED (was using headphones):                         │
+│    → Fall back: BT connected? → BT, else → Speakers             │
+│                                                                 │
+│  BLUETOOTH CONNECTED:                                           │
+│    1. Set BT sink as default (DIRECT - no virtual sink)         │
+│    2. Move streams to BT sink                                   │
+│                                                                 │
+│  BLUETOOTH DISCONNECTED (was using BT):                         │
+│    → Fall back: Jack plugged? → Headphones, else → Speakers     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Behavior**: Last connected device always wins (not priority-based)
 
 ## Verify Installation
 
